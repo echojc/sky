@@ -59,8 +59,12 @@ func main() {
 	}()
 
 	addrs, _ := getIPAddrs()
-	fmt.Printf("Serving '%s' on port %d...\n", cfg.Name, cfg.Port)
-	fmt.Printf("IPs: %v\n", addrs)
+	if len(addrs) == 1 {
+		fmt.Printf("Serving '%s' at http://%s:%d...\n", cfg.Name, addrs[0], cfg.Port)
+	} else {
+		fmt.Printf("Serving '%s' on port %d...\n", cfg.Name, cfg.Port)
+		fmt.Printf("Alternative IPs: %v\n", addrs)
+	}
 
 	s.Handler = m
 	if err = s.ListenAndServe(); err != http.ErrServerClosed {
