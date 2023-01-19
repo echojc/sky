@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type config struct {
@@ -18,6 +19,7 @@ type config struct {
 	Name string
 	Size int64
 	Path string
+	URL  string
 }
 
 func main() {
@@ -26,9 +28,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	f, err := os.Open(cfg.Path)
-	if err != nil {
-		log.Fatal(err)
+	var f *os.File
+
+	if cfg.Path != "" {
+		f, err = os.Open(cfg.Path)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	s := http.Server{
@@ -40,13 +46,18 @@ func main() {
 
 	m := http.NewServeMux()
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		v := fmt.Sprintf(`attachment; filename="%s"`, cfg.Name)
-		w.Header().Set("Content-Disposition", v)
-		w.Header().Set("Content-Length", strconv.FormatInt(cfg.Size, 10))
-		w.WriteHeader(http.StatusOK)
+		if cfg.URL != "" {
+			w.Header().Set("Location", cfg.URL)
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		} else {
+			v := fmt.Sprintf(`attachment; filename="%s"`, cfg.Name)
+			w.Header().Set("Content-Disposition", v)
+			w.Header().Set("Content-Length", strconv.FormatInt(cfg.Size, 10))
+			w.WriteHeader(http.StatusOK)
 
-		io.Copy(w, f)
-		f.Close()
+			io.Copy(w, f)
+			f.Close()
+		}
 		close(doShutdown)
 	})
 
@@ -58,11 +69,19 @@ func main() {
 		close(waitForShutdown)
 	}()
 
+	// build info string
+	var info string
+	if cfg.Name != "" {
+		info = fmt.Sprintf("Serving '%s'", cfg.Name)
+	} else {
+		info = fmt.Sprintf("Forwarding to '%s'", cfg.URL)
+	}
+
 	addrs, _ := getIPAddrs()
 	if len(addrs) == 1 {
-		fmt.Printf("Serving '%s' at http://%s:%d...\n", cfg.Name, addrs[0], cfg.Port)
+		fmt.Printf("%s at http://%s:%d...\n", info, addrs[0], cfg.Port)
 	} else {
-		fmt.Printf("Serving '%s' on port %d...\n", cfg.Name, cfg.Port)
+		fmt.Printf("%s on port %d...\n", info, cfg.Port)
 		fmt.Printf("Alternative IPs: %v\n", addrs)
 	}
 
@@ -81,11 +100,18 @@ func parseArgs() (config, error) {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		return c, errors.New("Missing file")
+		return c, errors.New("Missing file or URL")
+	}
+
+	path := args[0]
+
+	// shortcut if URL
+	if strings.HasPrefix(path, "http") {
+		c.URL = path
+		return c, nil
 	}
 
 	// validate file exists
-	path := args[0]
 	s, err := os.Stat(path)
 	if err != nil {
 		return c, err
